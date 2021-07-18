@@ -1,0 +1,318 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+Resources:
+  GermanBucket:
+    Type: 'AWS::S3::Bucket'
+    DependsOn: 
+    - checkLanguageFunction
+    - s3lambdaPermission
+    Properties:
+      BucketName: !Sub 'german-translate-bucket-${AWS::StackName}' 
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:Put
+            Function: !GetAtt checkLanguageFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .txt
+      Tags:
+        - Key: Product
+          Value: GermanStepFunction
+        - Key: Descriprion
+          Value: Bucket used to store.
+#FUNCTIONS
+  checkLanguageFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Sub 'checkLanguageFunction-${AWS::StackName}'
+      Role: !GetAtt checkLanguageRole.Arn
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Tags:
+        - Key: Product
+          Value: GermanStepFunction
+        - Key: Descriprion
+          Value: >-
+            LambdaFunction will check the language of the files submited to the
+            bucket using AWS Comprenhend
+      Code:
+        ZipFile: >
+          ### 05/07/2021
+          ### Writer:dgonzalez
+          ### This function has been designed to be used from AWS Lambda.
+          ### It has been designed to be trigger from an S3 Bucket and it will
+          ### handle '.txt' files.
+          ### Finally the function will make a request to AWS Comprehend to know in
+          ### wich language is the inforation of the file.
+          ### 
+          ### The function Role needs permissions to access the S3 bucket and AWS
+          ### Comprehend.
+          ### 
+          ### As an output, it will return the following atributes:
+          ### - statusCode
+          ### - objectName
+          ### - bucketName
+          ### - text
+          ### - language
+          ### - lenguageScore
+          
+
+          import json,boto3
+
+          def lambda_handler(event, context):
+
+              # Set up the AWS Boto3 cilents required
+              s3_client = boto3.client('s3')
+              comprehend_client = boto3.client('comprehend')
+
+              # Get the object and bucket Names
+              objectName = event['Records'][0]['s3']['object']['key']
+              bucketName = event['Records'][0]['s3']['bucket']['name']
+
+              # Get and Transform the text from binary into a string
+              s3Response = s3_client.get_object(
+                  Bucket=bucketName,
+                  Key=objectName,
+              )
+
+              binaryText = s3Response['Body'].read()
+              textToComprehend = bytearray(binaryText).decode('utf-8')
+
+              # Call the Comprehend API and check the lenguage of the text
+              comprehendResponse = comprehend_client.detect_dominant_language(
+                  Text=textToComprehend,
+              )
+
+              # Get the result of the Comprehend API request
+              language = comprehendResponse['Languages'][0]['LanguageCode']
+              languageScore = comprehendResponse['Languages'][0]['Score']
+
+              return {
+                  'statusCode': 200,
+                  'objectName': objectName,
+                  'bucketName': bucketName,
+                  'text': textToComprehend,
+                  'language': language,
+                  'lenguageScore': languageScore,
+              }
+  translateFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Sub 'translateFunction-${AWS::StackName}'
+      Role: !GetAtt translateRole.Arn
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Tags:
+        - Key: Product
+          Value: GermanStepFunction
+        - Key: Descriprion
+          Value: >-
+            LambdaFunction will check the language of the files submited to the
+            bucket using AWS Comprenhend
+      Code:
+        ZipFile: >
+          ### 05/07/2021
+          ### Writer:dgonzalez
+          ### This function has been designed to be used from AWS Lambda.
+          ### 
+          ### The function will take the arguments form an other Lambda function ('checkLanguage.py').
+          ### It will use the outputs form that function to translate the content from spanish to german and from german to spanish.
+          ### If the content is not in german nor spanish, it will translate it into english.
+          ### 
+          ### The function Role needs permissions to access the AWS Translete Service.
+          ### 
+          ### As an output, it will return the following atributes:
+          ### - statusCode
+          ### - sourceText
+          ### - translatedText
+          ### - sourceLenguage
+          ### - targetLenguage
+
+          import json,boto3
+
+          def lambda_handler(event, context):
+          
+              # Set up the AWS Boto3 cilents required
+              translate_client = boto3.client('translate')
+          
+              # Language Logic
+              if event['responsePayload']['language'] == 'de':
+                  targetLenguageCode = 'es'
+              elif event['responsePayload']['language'] == 'es':
+                  targetLenguageCode = 'de'
+              else:
+                  targetLenguageCode = 'en'
+          
+              # Call the Translate API and check the lenguage of the text
+              translateResponse = translate_client.translate_text(
+                  Text=event['responsePayload']['text'],
+                  SourceLanguageCode=event['responsePayload']['language'],
+                  TargetLanguageCode=targetLenguageCode
+              )
+          
+              # Get the result of the Translate API request
+              translatedText = translateResponse['TranslatedText']
+              sourceLanguage = translateResponse['SourceLanguageCode']
+              targetLanguage = translateResponse['TargetLanguageCode']
+          
+              return {
+                  'statusCode': 200,
+                  'sourceText': event['responsePayload']['text'],
+                  'objectName': event['responsePayload']['objectName'],
+                  'bucketName': event['responsePayload']['bucketName'],
+                  'translatedText': translatedText,
+                  'sourceLenguage': sourceLanguage,
+                  'targetLenguage': targetLanguage,
+              }
+  pollyConverterFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Sub 'pollyConverterFunction-${AWS::StackName}'
+      Role: !GetAtt pollyRole.Arn
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Tags:
+        - Key: Product
+          Value: GermanStepFunction
+        - Key: Descriprion
+          Value: >-
+            LambdaFunction will use AWS Polly to convert your German file into German Audio.
+      Code:
+        ZipFile: >
+          ### 06/07/2021
+
+          ### Writer:dgonzalez
+
+          ### This function has been designed to be used from AWS Lambda.
+          
+          import json,boto3,os          
+          
+          def lambda_handler(event, context):
+              
+              # Set up the AWS Boto3 cilents required
+              polly_client = boto3.client('polly')
+              s3_client = boto3.client('s3')
+          
+              if event['responsePayload']['sourceLenguage'] == 'de':
+                  pollyText = event['responsePayload']['sourceText']
+              elif event['responsePayload']['targetLenguage'] == 'de':
+                  pollyText = event['responsePayload']['translatedText']
+              
+              response = polly_client.synthesize_speech(
+                  Engine='neural',
+                  LanguageCode='de-DE',
+                  OutputFormat='mp3',
+                  SampleRate='22050',
+                  Text=pollyText,
+                  TextType='text',
+                  VoiceId='Vicki'
+              )
+              
+              fileName = '/tmp/' + event['responsePayload']['objectName']+'.mp3'
+              file = open(fileName, 'wb')
+              file.write(response['AudioStream'].read())
+              file.close()
+          
+              objectName = event['responsePayload']['objectName'].replace('.txt','.mp3')
+              s3_response = s3_client.upload_file(fileName,
+                                                  event['responsePayload']['bucketName'],
+                                                  objectName)
+              
+              return {
+                  'statusCode': 200,
+                  'body': 'Your audio file is waiting for you in your bucket'
+              }
+#ROLES
+  checkLanguageRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+                - 'sts:AssumeRole'
+      RoleName: checkLanguageRole
+      Description: This role is for the checkLanguage Lambda Function
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - 'arn:aws:iam::aws:policy/ComprehendFullAccess'
+        - 'arn:aws:iam::aws:policy/AWSLambda_FullAccess'
+  translateRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+                - 'sts:AssumeRole'
+      RoleName: translateRole
+      Description: This role is for the translate Lambda Function
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - 'arn:aws:iam::aws:policy/TranslateFullAccess'
+        - 'arn:aws:iam::aws:policy/AWSLambda_FullAccess'
+  pollyRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+                - 'sts:AssumeRole'
+      RoleName: pollyRole
+      Description: This role is for the polly Lambda Function
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonS3FullAccess'
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - 'arn:aws:iam::aws:policy/AmazonPollyFullAccess'
+        - 'arn:aws:iam::aws:policy/AWSLambda_FullAccess'
+  s3lambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt checkLanguageFunction.Arn
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub "arn:aws:s3:::german-translate-bucket-${AWS::StackName}"
+#LAMBDATRIGERS
+  lambdainvoker01:
+    Type: AWS::Lambda::EventInvokeConfig
+    DependsOn:
+    - translateFunction
+    - checkLanguageFunction
+    Properties:
+      DestinationConfig:
+          OnSuccess:
+            Destination: !GetAtt translateFunction.Arn
+      FunctionName: !Sub 'checkLanguageFunction-${AWS::StackName}'
+      MaximumEventAgeInSeconds: 300
+      MaximumRetryAttempts: 1
+      Qualifier: $LATEST
+  lambdainvoker02:
+    Type: AWS::Lambda::EventInvokeConfig
+    DependsOn:
+    - translateFunction
+    - checkLanguageFunction
+    Properties:
+      DestinationConfig:
+          OnSuccess:
+            Destination: !GetAtt pollyConverterFunction.Arn
+      FunctionName: !Sub 'translateFunction-${AWS::StackName}'
+      MaximumEventAgeInSeconds: 300
+      MaximumRetryAttempts: 1
+      Qualifier: $LATEST
+
