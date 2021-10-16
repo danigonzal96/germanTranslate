@@ -1,5 +1,4 @@
 AWSTemplateFormatVersion: 2010-09-09
-Parameters:
 Resources:
   GermanBucket:
     Type: 'AWS::S3::Bucket'
@@ -38,27 +37,7 @@ Resources:
             LambdaFunction will check the language of the files submited to the
             bucket using AWS Comprenhend
       Code:
-        ZipFile: >
-          ### 05/07/2021
-          ### Writer:dgonzalez
-          ### This function has been designed to be used from AWS Lambda.
-          ### It has been designed to be trigger from an S3 Bucket and it will
-          ### handle '.txt' files.
-          ### Finally the function will make a request to AWS Comprehend to know in
-          ### wich language is the inforation of the file.
-          ### 
-          ### The function Role needs permissions to access the S3 bucket and AWS
-          ### Comprehend.
-          ### 
-          ### As an output, it will return the following atributes:
-          ### - statusCode
-          ### - objectName
-          ### - bucketName
-          ### - text
-          ### - language
-          ### - lenguageScore
-          
-
+        ZipFile: >        
           import json,boto3
 
           def lambda_handler(event, context):
@@ -113,23 +92,6 @@ Resources:
             bucket using AWS Comprenhend
       Code:
         ZipFile: >
-          ### 05/07/2021
-          ### Writer:dgonzalez
-          ### This function has been designed to be used from AWS Lambda.
-          ### 
-          ### The function will take the arguments form an other Lambda function ('checkLanguage.py').
-          ### It will use the outputs form that function to translate the content from spanish to german and from german to spanish.
-          ### If the content is not in german nor spanish, it will translate it into english.
-          ### 
-          ### The function Role needs permissions to access the AWS Translete Service.
-          ### 
-          ### As an output, it will return the following atributes:
-          ### - statusCode
-          ### - sourceText
-          ### - translatedText
-          ### - sourceLenguage
-          ### - targetLenguage
-
           import json,boto3
 
           def lambda_handler(event, context):
@@ -180,14 +142,8 @@ Resources:
           Value: >-
             LambdaFunction will use AWS Polly to convert your German file into German Audio.
       Code:
-        ZipFile: >
-          ### 06/07/2021
-
-          ### Writer:dgonzalez
-
-          ### This function has been designed to be used from AWS Lambda.
-          
-          import json,boto3,os          
+        ZipFile: >         
+          import json,boto3,os                    
           
           def lambda_handler(event, context):
               
